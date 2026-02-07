@@ -1,0 +1,311 @@
+import React, { useState, useEffect, useMemo } from 'react';
+import { initializeApp } from 'firebase/app';
+import { 
+  getFirestore, 
+  doc, 
+  setDoc, 
+  onSnapshot, 
+  collection, 
+  query, 
+  getDoc 
+} from 'firebase/firestore';
+import { 
+  getAuth, 
+  signInAnonymously, 
+  onAuthStateChanged,
+  signInWithCustomToken 
+} from 'firebase/auth';
+import { 
+  CheckCircle2, 
+  Circle, 
+  Calendar, 
+  MessageSquare, 
+  BarChart3, 
+  Sun, 
+  Moon, 
+  Trophy, 
+  ChevronLeft, 
+  ChevronRight,
+  Share2
+} from 'lucide-react';
+
+// --- Firebase Configuration ---
+const firebaseConfig = JSON.parse(__firebase_config);
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'task-tracker-8127';
+
+// --- Constants ---
+const FIXED_TASKS = [
+  { id: 't1', label: 'Wake up at 8 AM', deadline: '08:00' },
+  { id: 't2', label: 'Study minimum 4 hours till 4 PM', deadline: '16:00' },
+  { id: 't3', label: 'Study minimum 4 hours till 10 PM', deadline: '22:00' },
+  { id: 't4', label: 'Study minimum 2 hours till 2 AM', deadline: '02:00' },
+];
+
+const WHATSAPP_NUMBER = '8127202925';
+
+export default function App() {
+  const [user, setUser] = useState(null);
+  const [darkMode, setDarkMode] = useState(true);
+  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
+  const [tasksState, setTasksState] = useState({});
+  const [history, setHistory] = useState({});
+  const [loading, setLoading] = useState(true);
+
+  // --- Auth Logic ---
+  useEffect(() => {
+    const initAuth = async () => {
+      try {
+        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+          await signInWithCustomToken(auth, __initial_auth_token);
+        } else {
+          await signInAnonymously(auth);
+        }
+      } catch (err) {
+        console.error("Auth error:", err);
+      }
+    };
+    initAuth();
+    const unsubscribe = onAuthStateChanged(auth, (u) => {
+      setUser(u);
+      if (u) setLoading(false);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // --- Data Fetching ---
+  useEffect(() => {
+    if (!user) return;
+
+    // Listen to all user history for dashboard
+    const historyRef = collection(db, 'artifacts', appId, 'users', user.uid, 'dailyTasks');
+    const unsubscribe = onSnapshot(historyRef, (snapshot) => {
+      const data = {};
+      snapshot.forEach(doc => {
+        data[doc.id] = doc.data();
+      });
+      setHistory(data);
+      // Update current view state if data exists for selected date
+      if (data[selectedDate]) {
+        setTasksState(data[selectedDate].tasks || {});
+      } else {
+        setTasksState({});
+      }
+    }, (error) => {
+      console.error("Firestore error:", error);
+    });
+
+    return () => unsubscribe();
+  }, [user, selectedDate]);
+
+  // --- Actions ---
+  const toggleTask = async (taskId) => {
+    if (!user) return;
+    const newState = {
+      ...tasksState,
+      [taskId]: !tasksState[taskId]
+    };
+    
+    setTasksState(newState);
+
+    const docRef = doc(db, 'artifacts', appId, 'users', user.uid, 'dailyTasks', selectedDate);
+    await setDoc(docRef, {
+      tasks: newState,
+      updatedAt: new Date().toISOString(),
+      date: selectedDate
+    }, { merge: true });
+  };
+
+  const generateWhatsAppReport = () => {
+    const dateStr = new Date(selectedDate).toLocaleDateString('en-GB');
+    let message = `*Daily Task Report*\nDate: ${dateStr}\n\n`;
+    
+    FIXED_TASKS.forEach(task => {
+      const isDone = tasksState[task.id];
+      message += `${isDone ? '✅' : '❌'} ${task.label} – ${isDone ? 'Completed' : 'Not Completed'}\n`;
+    });
+
+    const completionRate = Math.round((Object.values(tasksState).filter(Boolean).length / FIXED_TASKS.length) * 100);
+    message += `\n*Daily Progress:* ${completionRate}%`;
+    
+    const encodedMsg = encodeURIComponent(message);
+    window.open(`https://wa.me/${WHATSAPP_NUMBER}?text=${encodedMsg}`, '_blank');
+  };
+
+  // --- Calculations ---
+  const stats = useMemo(() => {
+    const dates = Object.keys(history).sort();
+    let streak = 0;
+    const today = new Date().toISOString().split('T')[0];
+    
+    // Simple streak calculation
+    let checkDate = new Date();
+    while (true) {
+      const dateKey = checkDate.toISOString().split('T')[0];
+      const dayData = history[dateKey];
+      const completedCount = Object.values(dayData?.tasks || {}).filter(Boolean).length;
+      if (completedCount === FIXED_TASKS.length) {
+        streak++;
+        checkDate.setDate(checkDate.getDate() - 1);
+      } else {
+        break;
+      }
+    }
+
+    const totalDays = Object.keys(history).length;
+    const perfectDays = Object.values(history).filter(d => 
+      Object.values(d.tasks || {}).filter(Boolean).length === FIXED_TASKS.length
+    ).length;
+
+    return { streak, totalDays, perfectDays };
+  }, [history]);
+
+  const progress = Math.round((Object.values(tasksState).filter(Boolean).length / FIXED_TASKS.length) * 100);
+
+  if (loading) {
+    return (
+      <div className="flex h-screen w-full items-center justify-center bg-slate-900 text-white">
+        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-blue-500"></div>
+      </div>
+    );
+  }
+
+  return (
+    <div className={`min-h-screen transition-colors duration-300 ${darkMode ? 'bg-slate-900 text-slate-100' : 'bg-slate-50 text-slate-900'}`}>
+      
+      {/* Header */}
+      <header className={`sticky top-0 z-10 backdrop-blur-md border-b ${darkMode ? 'bg-slate-900/80 border-slate-800' : 'bg-white/80 border-slate-200'} px-4 py-4`}>
+        <div className="max-w-md mx-auto flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <div className="p-2 bg-blue-600 rounded-lg">
+              <CheckCircle2 className="text-white w-6 h-6" />
+            </div>
+            <h1 className="font-bold text-xl tracking-tight">RoutineFlow</h1>
+          </div>
+          <button 
+            onClick={() => setDarkMode(!darkMode)}
+            className={`p-2 rounded-full ${darkMode ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-200 hover:bg-slate-300'}`}
+          >
+            {darkMode ? <Sun size={20} /> : <Moon size={20} />}
+          </button>
+        </div>
+      </header>
+
+      <main className="max-w-md mx-auto p-4 space-y-6 pb-24">
+        
+        {/* Date Selector */}
+        <section className={`p-4 rounded-2xl border ${darkMode ? 'bg-slate-800/50 border-slate-700' : 'bg-white border-slate-200 shadow-sm'}`}>
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-sm font-medium opacity-70">Target Date</span>
+            <Calendar size={16} className="opacity-50" />
+          </div>
+          <input 
+            type="date" 
+            value={selectedDate}
+            onChange={(e) => setSelectedDate(e.target.value)}
+            className={`w-full bg-transparent text-lg font-semibold focus:outline-none cursor-pointer`}
+          />
+        </section>
+
+        {/* Stats Cards */}
+        <section className="grid grid-cols-2 gap-4">
+          <div className={`p-4 rounded-2xl border ${darkMode ? 'bg-slate-800/50 border-slate-700' : 'bg-white border-slate-200 shadow-sm'}`}>
+            <div className="flex items-center gap-2 mb-1 text-orange-500">
+              <Trophy size={16} />
+              <span className="text-xs font-bold uppercase tracking-wider">Streak</span>
+            </div>
+            <div className="text-2xl font-black">{stats.streak} Days</div>
+          </div>
+          <div className={`p-4 rounded-2xl border ${darkMode ? 'bg-slate-800/50 border-slate-700' : 'bg-white border-slate-200 shadow-sm'}`}>
+            <div className="flex items-center gap-2 mb-1 text-blue-500">
+              <BarChart3 size={16} />
+              <span className="text-xs font-bold uppercase tracking-wider">Perfect</span>
+            </div>
+            <div className="text-2xl font-black">{stats.perfectDays} Days</div>
+          </div>
+        </section>
+
+        {/* Progress Bar */}
+        <section className="space-y-2">
+          <div className="flex justify-between text-sm font-bold">
+            <span>Daily Completion</span>
+            <span>{progress}%</span>
+          </div>
+          <div className={`h-3 w-full rounded-full overflow-hidden ${darkMode ? 'bg-slate-800' : 'bg-slate-200'}`}>
+            <div 
+              className="h-full bg-gradient-to-r from-blue-500 to-indigo-500 transition-all duration-500 ease-out"
+              style={{ width: `${progress}%` }}
+            />
+          </div>
+        </section>
+
+        {/* Tasks List */}
+        <section className="space-y-3">
+          <h2 className="text-sm font-bold uppercase tracking-widest opacity-60 px-1">Today's Goals</h2>
+          {FIXED_TASKS.map((task) => (
+            <div 
+              key={task.id}
+              onClick={() => toggleTask(task.id)}
+              className={`group flex items-center justify-between p-4 rounded-2xl border cursor-pointer transition-all active:scale-[0.98] ${
+                tasksState[task.id] 
+                  ? (darkMode ? 'bg-blue-500/10 border-blue-500/50' : 'bg-blue-50 border-blue-200')
+                  : (darkMode ? 'bg-slate-800 border-slate-700 hover:border-slate-500' : 'bg-white border-slate-200 hover:border-slate-300')
+              }`}
+            >
+              <div className="flex items-center gap-4">
+                <div className={`transition-transform duration-300 ${tasksState[task.id] ? 'scale-110 text-blue-500' : 'text-slate-400'}`}>
+                  {tasksState[task.id] ? <CheckCircle2 size={28} /> : <Circle size={28} />}
+                </div>
+                <div>
+                  <p className={`font-semibold transition-all ${tasksState[task.id] ? 'opacity-50 line-through' : ''}`}>
+                    {task.label}
+                  </p>
+                  <p className="text-xs opacity-50 font-medium">By {task.deadline}</p>
+                </div>
+              </div>
+            </div>
+          ))}
+        </section>
+
+        {/* WhatsApp Button */}
+        <button 
+          onClick={generateWhatsAppReport}
+          className="w-full flex items-center justify-center gap-2 py-4 bg-emerald-600 hover:bg-emerald-500 text-white rounded-2xl font-bold shadow-lg shadow-emerald-900/20 transition-all active:scale-95"
+        >
+          <MessageSquare size={20} />
+          Send Report to WhatsApp
+        </button>
+
+        {/* History Preview */}
+        <section className="space-y-3">
+          <h2 className="text-sm font-bold uppercase tracking-widest opacity-60 px-1">History</h2>
+          <div className="space-y-2">
+            {Object.keys(history).sort().reverse().slice(0, 5).map(dateKey => {
+              const dayTasks = history[dateKey].tasks || {};
+              const dayProgress = Math.round((Object.values(dayTasks).filter(Boolean).length / FIXED_TASKS.length) * 100);
+              return (
+                <div key={dateKey} className={`flex items-center justify-between p-3 rounded-xl border ${darkMode ? 'bg-slate-800/30 border-slate-800' : 'bg-slate-100 border-slate-200 text-sm'}`}>
+                  <span className="font-mono">{new Date(dateKey).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}</span>
+                  <div className="flex-1 mx-4 h-1.5 rounded-full bg-slate-700 overflow-hidden">
+                    <div className="h-full bg-blue-500" style={{ width: `${dayProgress}%` }} />
+                  </div>
+                  <span className="font-bold">{dayProgress}%</span>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+
+      </main>
+
+      {/* Quick Info Modal/Footer */}
+      <footer className={`fixed bottom-0 left-0 right-0 p-4 border-t backdrop-blur-lg ${darkMode ? 'bg-slate-900/90 border-slate-800' : 'bg-white/90 border-slate-200'}`}>
+        <div className="max-w-md mx-auto text-center text-[10px] uppercase tracking-tighter opacity-40">
+           User ID: {user?.uid} • Data Saved Automatically
+        </div>
+      </footer>
+    </div>
+  );
+}
