@@ -45,7 +45,10 @@
 
     <!-- Loading Overlay -->
     <div id="loading-overlay" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900">
-        <div class="animate-spin rounded-full h-12 w-12 border-t-2 border-blue-500"></div>
+        <div class="flex flex-col items-center gap-4">
+            <div class="animate-spin rounded-full h-12 w-12 border-t-2 border-blue-500"></div>
+            <p class="text-slate-400 text-sm animate-pulse">Initializing Sync...</p>
+        </div>
     </div>
 
     <!-- Header -->
@@ -188,6 +191,8 @@
                 }
             } catch (err) {
                 console.error("Auth error:", err);
+                // Even on error, hide loader so user can see UI
+                loadingOverlay.classList.add('hidden');
             }
         }
 
@@ -317,28 +322,25 @@
             darkMode = !darkMode;
             document.body.className = darkMode ? 'dark-mode min-h-screen' : 'light-mode min-h-screen';
             
-            // Update components manually since Tailwind classes were static
             const sections = [document.getElementById('date-section'), document.getElementById('streak-card'), document.getElementById('perfect-card')];
             const header = document.getElementById('main-header');
             const footer = document.getElementById('main-footer');
             const progressBg = document.getElementById('progress-bg');
 
             if (darkMode) {
-                sections.forEach(s => s.classList.replace('bg-white', 'bg-slate-800/50'));
-                sections.forEach(s => s.classList.replace('border-slate-200', 'border-slate-700'));
+                sections.forEach(s => s.className = 'p-4 rounded-2xl border border-slate-700 bg-slate-800/50');
                 header.className = 'sticky top-0 z-10 backdrop-blur-md border-b border-slate-800 bg-slate-900/80 px-4 py-4';
                 footer.className = 'fixed bottom-0 left-0 right-0 p-4 border-t border-slate-800 backdrop-blur-lg bg-slate-900/90';
                 progressBg.className = 'h-3 w-full bg-slate-800 rounded-full overflow-hidden';
                 themeIcon.setAttribute('data-lucide', 'sun');
-                themeToggle.classList.replace('bg-slate-200', 'bg-slate-800');
+                themeToggle.className = 'p-2 rounded-full bg-slate-800 hover:bg-slate-700 transition-colors';
             } else {
-                sections.forEach(s => s.classList.replace('bg-slate-800/50', 'bg-white'));
-                sections.forEach(s => s.classList.replace('border-slate-700', 'border-slate-200'));
+                sections.forEach(s => s.className = 'p-4 rounded-2xl border border-slate-200 bg-white');
                 header.className = 'sticky top-0 z-10 backdrop-blur-md border-b border-slate-200 bg-white/80 px-4 py-4';
                 footer.className = 'fixed bottom-0 left-0 right-0 p-4 border-t border-slate-200 backdrop-blur-lg bg-white/90';
                 progressBg.className = 'h-3 w-full bg-slate-200 rounded-full overflow-hidden';
                 themeIcon.setAttribute('data-lucide', 'moon');
-                themeToggle.classList.replace('bg-slate-800', 'bg-slate-200');
+                themeToggle.className = 'p-2 rounded-full bg-slate-200 hover:bg-slate-300 transition-colors';
             }
             updateUI();
         };
@@ -358,7 +360,14 @@
             window.open(`https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(message)}`, '_blank');
         };
 
+        // Initialize App
         initAuth();
+        
+        // Safety timeout to hide loader if auth hangs
+        setTimeout(() => {
+            loadingOverlay.classList.add('hidden');
+            lucide.createIcons();
+        }, 3000);
     </script>
 </body>
 </html>
